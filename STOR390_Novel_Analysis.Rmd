@@ -1,0 +1,173 @@
+---
+title: "STOR 390 Final Novel Analysis"
+author: "Grace Sun"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+vr_data <- read.csv("VR_data.csv", sep=";")
+head(vr_data)
+```
+
+```{r}
+simple_mod = lm(totalImmersion~., data = vr_data)
+summary(simple_mod)
+```
+
+```{r}
+# Check for collinearity
+library(car)
+vif(simple_mod)
+
+# Take out height because it is very highly correlated with width
+vr_data <- subset(vr_data, select=-c(3))
+```
+
+```{r}
+simple_mod = lm(totalImmersion~., data = vr_data)
+summary(simple_mod)
+```
+
+```{r}
+simple_interaction_mod = lm(totalImmersion ~ (.)^2, data = vr_data)
+summary(simple_interaction_mod)
+```
+
+```{r}
+predictor_variables <- names(vr_data)[1:22] 
+formula_string <- "totalImmersion ~"
+for(variable in predictor_variables) { formula_string <- paste0(formula_string, " ", variable, " + I(", variable, "^2)", " +") }
+
+formula_string <- substr(formula_string, 1, nchar(formula_string) - 1)
+complete_no_interaction_formula <- as.formula(formula_string)
+
+complete_no_interaction_mod <- lm(complete_no_interaction_formula, data = vr_data)
+summary(complete_no_interaction_mod)
+```
+
+```{r}
+predictor_variables <- names(vr_data)[1:22] 
+formula_string <- "totalImmersion ~ "
+
+formula_string <- paste(formula_string, paste0("I(", predictor_variables, "^2)", collapse = " + "), " + ")
+
+for (i in 1:(length(predictor_variables) - 1)) {
+  for (j in (i + 1):length(predictor_variables)) {
+    formula_string <- paste(formula_string, paste0(predictor_variables[i], ":", predictor_variables[j]), " + ")
+  }
+}
+
+formula_string <- paste(formula_string, paste(predictor_variables, collapse = " + "))
+formula_string <- sub(" \\+ $", "", formula_string)
+complete_formula <- as.formula(formula_string)
+complete_mod <- lm(complete_formula, data = vr_data)
+
+summary(complete_mod)
+```
+
+```{r}
+predictor_variables = c("width","fps","contrast","time","textures","headphones","locomotion")
+formula_string <- "totalImmersion ~ "
+formula_string <- paste(formula_string, paste0("I(", predictor_variables, "^2)", collapse = " + "), " + ")
+
+for (i in 1:(length(predictor_variables) - 1)) {
+  for (j in (i + 1):length(predictor_variables)) {
+    formula_string <- paste(formula_string, paste0(predictor_variables[i], ":", predictor_variables[j]), " + ")
+  }
+}
+
+formula_string <- paste(formula_string, paste(predictor_variables, collapse = " + "))
+formula_string <- sub(" \\+ $", "", formula_string)
+manual_formula <- as.formula(formula_string)
+manual_mod <- lm(manual_formula, data = vr_data)
+
+summary(manual_mod)
+```
+
+```{r}
+library(MASS)
+A_forward = step(complete_mod, direction = "forward", trace = FALSE, p.value = 0.05)
+A_backward = step(complete_mod, direction = "backward", trace = FALSE, p.value = 0.05)
+A_stepwise = step(complete_mod, direction = "both", trace = FALSE, p.value = 0.05)
+options(max.print=10)
+summary(A_forward)$adj.r.squared
+summary(A_forward)$df
+summary(A_backward)$adj.r.squared
+summary(A_backward)$df
+summary(A_stepwise)$adj.r.squared
+summary(A_stepwise)$df
+```
+
+```{r}
+# Discovered that these are all the same, and the p.value parameter, while it does not throw an error, does not change the outcome and is not considered.
+# Left here for progress tracking and illustrating my analysis process.
+# library(MASS)
+# B_forward = stepAIC(complete_mod, direction = "forward", trace = FALSE)
+# B_backward = stepAIC(complete_mod, direction = "backward", trace = FALSE)
+# B_stepwise = stepAIC(complete_mod, direction = "both", trace = FALSE)
+# summary(B_forward)$adj.r.squared
+# summary(B_backward)$adj.r.squared
+# summary(B_stepwise)$adj.r.squared
+# C_forward = stepAIC(complete_mod, direction = "forward", trace = FALSE, p.value = 0.005)
+# C_backward = stepAIC(complete_mod, direction = "backward", trace = FALSE, p.value = 0.005)
+# C_stepwise = stepAIC(complete_mod, direction = "both", trace = FALSE, p.value = 0.005)
+# summary(C_forward)$adj.r.squared
+# summary(C_backward)$adj.r.squared
+# summary(C_stepwise)$adj.r.squared
+# D_forward = stepAIC(complete_mod, direction = "forward", trace = FALSE, p.value = 0.001)
+# D_backward = stepAIC(complete_mod, direction = "backward", trace = FALSE, p.value = 0.001)
+# D_stepwise = stepAIC(complete_mod, direction = "both", trace = FALSE, p.value = 0.001)
+# summary(D_forward)$adj.r.squared
+# summary(D_backward)$adj.r.squared
+# summary(D_stepwise)$adj.r.squared
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(ISLR)
+```
+
+```{r}
+cross_val = function(model_formula, model_name, data){
+  train_control <- trainControl(
+    method = "repeatedcv",
+    number = 10,            
+    repeats = 10,            
+    savePredictions = "final",
+    summaryFunction = defaultSummary
+  )
+  
+  set.seed(123)  # for reproducibility
+  model_fit <- train(
+    model_formula, 
+    data = data, 
+    method = "lm",
+    trControl = train_control
+  )
+  
+  print(model_name)
+  
+  print(model_fit)
+  
+  # Calculate adjusted R^2
+  R2 <- model_fit$results$Rsquared 
+  n <- nrow(vr_data)
+  p <- length(model_fit$finalModel$coefficients) - 1  # subtract 1 to exclude the intercept
+  R2_adj <- 1 - (1 - R2) * (n - 1) / (n - p - 1)
+  
+  print(paste("Adjusted R^2:", R2_adj))
+}
+```
+
+```{r warning=FALSE}
+cross_val(totalImmersion~., "Simple Model", vr_data)
+cross_val(totalImmersion~(.)^2, "Simple Model with Interactions", vr_data)
+cross_val(complete_no_interaction_formula, "Complete Model without Interactions", vr_data)
+cross_val(complete_formula, "Complete Model", vr_data)
+cross_val(manual_formula, "Manual Model", vr_data)
+cross_val(A_backward$call$formula, "Backwards Selection Model", vr_data)
+cross_val(A_stepwise$call$formula, "Stepwise Selection Model", vr_data)
+```
+
